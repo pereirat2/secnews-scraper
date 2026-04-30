@@ -51,6 +51,15 @@ $EDITOR .env                 # set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
 
 bash scripts/install.sh
 ```
+## Quick Update with Alias (Kali / Debian, root)
+```bash
+!This is non destructive for your news data!
+From Dev machine -> Server
+Add to your Kali ~/.bashrc or ~/.zshrc:
+
+alias secnews-update='cd /opt/secnews && git pull && sudo bash scripts/install.sh && echo "[+] secnews updated"'
+
+```
 
 `install.sh` will:
 - Install OS deps (`python3`, `python3-venv`, `util-linux`, `logrotate`).
