@@ -1,0 +1,11 @@
+# /etc/cron.d/secnews — installed by scripts/install.sh
+# flock prevents overlapping runs if a previous job is still in flight.
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Collector at top of every hour
+0 * * * * root /usr/bin/flock -n /run/secnews-collector.lock /opt/secnews/scripts/run_collector.sh >> /var/log/secnews/collector.log 2>&1
+
+# Processor at five past every hour
+5 * * * * root /usr/bin/flock -n /run/secnews-processor.lock /opt/secnews/scripts/run_processor.sh >> /var/log/secnews/processor.log 2>&1
