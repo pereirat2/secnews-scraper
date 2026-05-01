@@ -190,28 +190,15 @@ def dedup_items(items: list[dict]) -> list[dict]:
 
 
 # === MESSAGE FORMATTING (HTML) ===
-def format_message(critical: list[dict], high: list[dict], medium: list[dict]) -> str:
+def format_message(items: list[dict]) -> str:
+    """Render the digest. Items should already be deduped and ordered."""
     now = datetime.now(timezone.utc)
     date_str = now.strftime("%d %b %Y %H:%M")
 
-    parts: list[str] = []
-    parts.append(f"<b>SECURITY DIGEST</b> — {escape_html(date_str)} UTC")
-    parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    parts.append("")
-
-    sections = (
-        ("\U0001F534 <b>CRITICAL</b>", critical),
-        ("\U0001F7E0 <b>HIGH</b>", high),
-        ("\U0001F7E1 <b>MEDIUM</b>", medium),
-    )
-    for header, items in sections:
-        if not items:
-            continue
-        parts.append(header)
+    parts: list[str] = [f"<b>SECURITY DIGEST</b> — {escape_html(date_str)} UTC", ""]
+    for item in items:
+        parts.append(_format_item(item))
         parts.append("")
-        for item in items:
-            parts.append(_format_item(item))
-            parts.append("")
 
     parts.append("<i>— Next update in ~60 min</i>")
     return "\n".join(parts)
@@ -223,10 +210,10 @@ def _format_item(item: dict) -> str:
     source = escape_html(item.get("source", "Unknown"))
     url = escape_html_attr(item.get("url", ""))
 
-    lines = [f"• <b>{title}</b>"]
+    lines = [f"<b>Title:</b> {title}"]
     if summary:
-        lines.append(escape_html(summary))
-    lines.append(f"Source: {source} | <a href=\"{url}\">Read more</a>")
+        lines.append(f"<b>Summary:</b> {escape_html(summary)}")
+    lines.append(f"<b>Source:</b> {source} | <a href=\"{url}\">Read more</a>")
     return "\n".join(lines)
 
 
@@ -294,12 +281,13 @@ def main() -> int:
         elif sev == "medium":
             medium.append(item)
 
-    critical = dedup_items(critical)
-    high = dedup_items(high)
-    medium = dedup_items(medium)
-    total = len(critical) + len(high) + len(medium)
+    # Severity is still used for ordering (critical → high → medium), but no
+    # longer surfaced in the digest. Dedup once across the union so we don't
+    # emit the same story twice if it landed in two buckets.
+    items = dedup_items(critical + high + medium)
+    total = len(items)
 
-    log.info("After classification: %d critical, %d high, %d medium (%d total).",
+    log.info("After classification: %d critical, %d high, %d medium (%d total post-dedup).",
              len(critical), len(high), len(medium), total)
 
     if total == 0:
@@ -307,7 +295,7 @@ def main() -> int:
         _mark_processed(data, unprocessed)
         return 0
 
-    message = format_message(critical, high, medium)
+    message = format_message(items)
     log.info("Built digest: %d chars.", len(message))
 
     try:
