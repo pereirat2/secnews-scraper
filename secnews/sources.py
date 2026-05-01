@@ -31,6 +31,8 @@ SOURCES: list[tuple[str, str, bool, dict]] = [
 
     # === Threat intelligence & vendor research ===
     ("Google Security", "https://security.googleblog.com/atom.xml", False, {}),
+    ("Project Zero", "https://googleprojectzero.blogspot.com/feeds/posts/default", False, {}),
+    ("Microsoft Security", "https://www.microsoft.com/en-us/security/blog/feed", False, {}),
     ("Mozilla Security", "https://blog.mozilla.org/security/feed/", False, {}),
     ("Mandiant", "https://www.mandiant.com/resources/blog/rss.xml", False, {}),
     ("Unit 42", "https://unit42.paloaltonetworks.com/feed/", False, {}),
@@ -42,6 +44,7 @@ SOURCES: list[tuple[str, str, bool, dict]] = [
     ("Proofpoint", "https://www.proofpoint.com/us/rss.xml", False, {}),
     ("Wiz Blog", "https://www.wiz.io/feed/rss.xml", False, {}),
     ("WeLiveSecurity", "https://www.welivesecurity.com/feed/", False, {}),
+    ("Cloudflare Security", "https://blog.cloudflare.com/tag/security/rss/", False, {}),
 
     # === Security news sites ===
     ("The Record", "https://therecord.media/feed/", False, {}),
@@ -49,6 +52,8 @@ SOURCES: list[tuple[str, str, bool, dict]] = [
     ("InfosecMagazine", "https://www.infosecurity-magazine.com/rss/news/", False, {}),
     ("ThreatCluster", "https://threatcluster.io/rss", False, {}),
     ("TheHackerWire", "https://www.thehackerwire.com/rss", False, {"User-Agent": "Mozilla/5.0"}),
+    ("Risky Business News", "https://risky.biz/feeds/risky-business-news/", False, {}),
+    ("Schneier on Security", "https://www.schneier.com/feed/atom/", False, {}),
 
     # === Aggregators & community (filtered by keywords) ===
     ("HN RSS", "https://news.ycombinator.com/rss", False, {}),

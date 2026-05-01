@@ -10,7 +10,7 @@ A zero-LLM cybersecurity news pipeline. Pulls ~30 RSS/Atom/JSON feeds, deduplica
 
 ## Features
 
-- 30+ feeds: vendor blogs (Google, Mozilla, Mandiant, Unit 42, Talos…), news sites (BleepingComputer, KrebsOnSecurity, The Register, Dark Reading…), researcher Mastodon (Troy Hunt, Will Dormann), CISA KEV, Exploit-DB, and more.
+- 35+ feeds: vendor research (Google Project Zero, Microsoft Security, Mandiant, Unit 42, Talos, Cloudflare, Mozilla, …), news sites (BleepingComputer, KrebsOnSecurity, The Register, Dark Reading, Risky Business News, Schneier, …), researcher Mastodon (Troy Hunt, Will Dormann), CISA KEV, Exploit-DB, and more.
 - 48h URL dedup + fuzzy title match (catches the same CVE story across multiple outlets).
 - Aggregator sources (HN, Full Disclosure) are filtered against a security keyword list.
 - Severity classification (`CRITICAL` / `HIGH` / `MEDIUM` / `DISCARD`) used to filter noise, order items, pick a per-item color icon (🔴/🟠/🟡), and decide whether the post pings subscribers.
