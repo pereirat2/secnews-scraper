@@ -1,6 +1,6 @@
 # secnews-scraper
 
-A zero-LLM cybersecurity news pipeline. Pulls ~30 RSS/Atom/JSON feeds, deduplicates, classifies by severity, and posts an hourly digest to Telegram. Runs as two cron jobs on Linux. No external services beyond the feeds and the Telegram Bot API.
+A zero-LLM cybersecurity news pipeline. Pulls ~30 RSS/Atom/JSON feeds, deduplicates, filters noise via severity classification, and posts an hourly digest to Telegram. Runs as two cron jobs on Linux. No external services beyond the feeds and the Telegram Bot API.
 
 ```
    :00 UTC ───► collector ──► /var/lib/secnews/cyber_news_24h.json
@@ -13,10 +13,22 @@ A zero-LLM cybersecurity news pipeline. Pulls ~30 RSS/Atom/JSON feeds, deduplica
 - 30+ feeds: vendor blogs (Google, Mozilla, Mandiant, Unit 42, Talos…), news sites (BleepingComputer, KrebsOnSecurity, The Register, Dark Reading…), researcher Mastodon (Troy Hunt, Will Dormann), CISA KEV, Exploit-DB, and more.
 - 48h URL dedup + fuzzy title match (catches the same CVE story across multiple outlets).
 - Aggregator sources (HN, Full Disclosure) are filtered against a security keyword list.
-- Three-tier severity classification (`CRITICAL / HIGH / MEDIUM`) with a `DISCARD` default — only what matters reaches the chat.
-- HTML-formatted Telegram digest with auto-chunking at 4000 chars and a parse-failure fallback to plain text.
+- Internal severity classification (`CRITICAL` / `HIGH` / `MEDIUM` / `DISCARD`) used to filter noise and order items — not surfaced in the digest.
+- Clean labeled digest format (`Title: / Summary: / Source:`) with HTML formatting, auto-chunking at 4000 chars, and a parse-failure fallback to plain text.
 - Atomic JSON writes, retry/backoff on HTTP, `flock`-protected cron, log rotation.
 - Idle-hour "funny filler" message, throttled to once per hour.
+
+### Digest format
+
+Each item is rendered as three labeled lines:
+
+```
+Title: US ransomware negotiators get 4 years in prison over BlackCat attacks
+Summary: Two former employees of cybersecurity incident response companies Sygnia and DigitalMint were sentenced to four years in prison.
+Source: BleepingComputer | Read more
+```
+
+`Title:`, `Summary:`, and `Source:` are bold; `Read more` is a clickable hyperlink. The `Summary:` line is omitted when the source feed doesn't provide one. Items are ordered most-severe first internally (critical → high → medium) but no severity labels appear in the message.
 
 ## Project layout
 
@@ -40,7 +52,7 @@ secnews-scraper/
 └── README.md
 ```
 
-## Quick install (Kali / Debian, root)
+## Quick install (Linux, root)
 
 ```bash
 git clone git@github.com:pereirat2/secnews-scraper.git /opt/secnews
@@ -51,11 +63,11 @@ $EDITOR .env                 # set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
 
 bash scripts/install.sh
 ```
-## Quick Update with Alias (Kali / Debian, root)
+## Quick Update with Alias (Linux, root)
 ```bash
 !This is non destructive for your news data!
 From Dev machine -> Server
-Add to your Kali ~/.bashrc or ~/.zshrc:
+Add to your ~/.bashrc or ~/.zshrc:
 
 alias secnews-update='cd /opt/secnews && git pull && sudo bash scripts/install.sh && echo "[+] secnews updated"'
 
@@ -142,7 +154,12 @@ Edit `secnews/sources.py`. Each entry is `(name, url, is_json_api, extra_headers
 
 ## Tuning severity classification
 
-Severity rules live in `secnews/processor.py` as four pattern lists:
+Severity is computed internally and used for two things:
+
+1. **Filtering** — anything classified `discard` (or matching no pattern at all) never reaches Telegram.
+2. **Ordering** — items appear in the digest most-severe first (`critical → high → medium`), even though the labels themselves aren't shown.
+
+Rules live in `secnews/processor.py` as four pattern lists:
 
 - `DISCARD_PATTERNS` — drops the item entirely (matched first).
 - `CRITICAL_PATTERNS` — actively-exploited, emergency, in-the-wild, etc.
