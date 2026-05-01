@@ -167,38 +167,145 @@ def _truncate_words(sent: str, max_words: int) -> str:
 
 
 # === DEDUPLICATION ===
+#
+# We compare every incoming article against everything we've already kept
+# this cycle and reject it if any of these signals fires:
+#
+#   1. Same CVE-ID  -> exact dup
+#   2. Title Jaccard >= TITLE_JACCARD       (after stop-word + stem)
+#   3. Combined (title+desc) Jaccard >= COMBINED_JACCARD
+#   4. Lower combined Jaccard (>= SECONDARY_JACCARD) AND >= MIN_SHARED_SPECIFIC
+#      shared "specific" tokens (length >= 6, post-stem) — catches stories
+#      that share a few rare technical/proper-noun terms even when generic
+#      phrasing differs
+#
+# Override: if both articles carry CVE IDs and they're DIFFERENT, we never
+# merge them — that prevents e.g. CVE-2026-42778 and CVE-2026-42779 in
+# Apache MINA from being collapsed just because their titles overlap.
+#
+# Thresholds err aggressive: the user explicitly prefers occasionally
+# suppressing a unique-but-similar story over shipping 4 different outlets'
+# write-ups of the same incident.
+
+TITLE_JACCARD = 0.30
+COMBINED_JACCARD = 0.25
+SECONDARY_JACCARD = 0.10
+MIN_SHARED_SPECIFIC = 3
+SPECIFIC_MIN_LEN = 6
+
+_CVE_FINDALL = re.compile(r"CVE-\d{4}-\d+", re.IGNORECASE)
+_HTML_TAG = re.compile(r"<[^>]+>")
+_NON_ALNUM = re.compile(r"[^a-z0-9]+")
+
+# Common English words plus a few headline-stuffer words ("two", "new",
+# "us", "uk") that carry no topic information.
+_STOPWORDS: frozenset[str] = frozenset({
+    "the", "and", "for", "are", "was", "were", "with", "from", "that", "this",
+    "these", "those", "have", "has", "had", "having", "been", "being", "but",
+    "not", "you", "your", "they", "their", "them", "his", "her", "its", "our",
+    "him", "she", "who", "what", "when", "where", "why", "how", "all", "any",
+    "both", "each", "few", "more", "most", "other", "some", "such", "only",
+    "own", "same", "than", "too", "very", "can", "will", "just", "now", "also",
+    "into", "out", "over", "under", "again", "further", "then", "once", "here",
+    "there", "off", "above", "below", "during", "before", "after", "between",
+    "around", "such", "less", "still", "yet", "while", "though", "although",
+    "however", "thus", "hence", "therefore", "because", "since", "until",
+    "unless", "if", "say", "said", "says", "make", "made", "use", "used",
+    "get", "got", "going", "goes", "see", "seen", "may", "might", "must",
+    "should", "would", "could", "shall", "ought", "did", "does", "doing",
+    # headline filler — almost meaningless on their own
+    "two", "three", "four", "five", "new", "old", "first", "last", "year",
+    "years", "day", "days", "week", "month", "us", "uk", "eu", "vs", "via",
+    "way", "ways", "back", "next", "today", "tomorrow", "yesterday",
+})
+
+
+def _stem(word: str) -> str:
+    """Tiny suffix-strip stemmer. Not Porter-grade but no extra deps."""
+    for suffix in ("ies", "ied", "ing", "ed", "es", "s"):
+        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+            return word[: -len(suffix)]
+    return word
+
+
+def _tokenize(text: str) -> frozenset[str]:
+    """Lowercase, drop HTML, drop punctuation, drop stopwords, simple stem."""
+    if not text:
+        return frozenset()
+    cleaned = _HTML_TAG.sub(" ", text.lower())
+    return frozenset(
+        _stem(t)
+        for t in _NON_ALNUM.split(cleaned)
+        if t and len(t) > 2 and t not in _STOPWORDS
+    )
+
+
+def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    if inter == 0:
+        return 0.0
+    return inter / len(a | b)
+
+
 def dedup_items(items: list[dict]) -> list[dict]:
     seen_cves: set[str] = set()
-    seen_titles: list[str] = []
+    sigs: list[dict] = []
     out: list[dict] = []
 
     for item in items:
-        title = item.get("title", "")
-        desc = item.get("description", "")
-        combined = f"{title} {desc}"
-        cves = {m.upper() for m in re.findall(r"CVE-\d{4}-\d+", combined, re.IGNORECASE)}
-        if any(c in seen_cves for c in cves):
+        title = item.get("title", "") or ""
+        desc = item.get("description", "") or ""
+        combined = f"{title} {desc[:600]}"
+
+        cves = {m.upper() for m in _CVE_FINDALL.findall(combined)}
+        if cves and any(c in seen_cves for c in cves):
             continue
-        seen_cves |= cves
 
-        tl = title.lower()
-        words = tl.split()
-        if len(words) < 4:
-            if any(tl == s for s in seen_titles):
+        title_tokens = _tokenize(title)
+        combined_tokens = _tokenize(combined)
+        specific = frozenset(t for t in combined_tokens if len(t) >= SPECIFIC_MIN_LEN)
+
+        is_dup = False
+        for prev in sigs:
+            # Different CVEs → always treat as distinct vulnerabilities.
+            if cves and prev["cves"] and not (cves & prev["cves"]):
                 continue
-        else:
-            wa = set(words)
-            duplicate = False
-            for s in seen_titles:
-                wb = set(s.split())
-                overlap = len(wa & wb) / max(len(wa | wb), 1)
-                if overlap > 0.6:
-                    duplicate = True
+
+            # Signal 1: title tokens overlap heavily.
+            t_inter = len(title_tokens & prev["title"])
+            if t_inter >= 2:
+                t_jac = t_inter / max(len(title_tokens | prev["title"]), 1)
+                if t_jac >= TITLE_JACCARD:
+                    is_dup = True
                     break
-            if duplicate:
-                continue
 
-        seen_titles.append(tl)
+            # Signal 2: title+description tokens overlap.
+            c_inter = len(combined_tokens & prev["combined"])
+            if c_inter >= 3:
+                c_jac = c_inter / max(len(combined_tokens | prev["combined"]), 1)
+                if c_jac >= COMBINED_JACCARD:
+                    is_dup = True
+                    break
+                # Signal 3: weaker text overlap rescued by shared rare tokens.
+                if (
+                    c_jac >= SECONDARY_JACCARD
+                    and len(specific & prev["specific"]) >= MIN_SHARED_SPECIFIC
+                ):
+                    is_dup = True
+                    break
+
+        if is_dup:
+            continue
+
+        seen_cves |= cves
+        sigs.append({
+            "cves": cves,
+            "title": title_tokens,
+            "combined": combined_tokens,
+            "specific": specific,
+        })
         out.append(item)
     return out
 

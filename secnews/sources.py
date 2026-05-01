@@ -32,7 +32,6 @@ SOURCES: list[tuple[str, str, bool, dict]] = [
     # === Threat intelligence & vendor research ===
     ("Google Security", "https://security.googleblog.com/atom.xml", False, {}),
     ("Project Zero", "https://googleprojectzero.blogspot.com/feeds/posts/default", False, {}),
-    ("Microsoft Security", "https://www.microsoft.com/en-us/security/blog/feed", False, {}),
     ("Mozilla Security", "https://blog.mozilla.org/security/feed/", False, {}),
     ("Mandiant", "https://www.mandiant.com/resources/blog/rss.xml", False, {}),
     ("Unit 42", "https://unit42.paloaltonetworks.com/feed/", False, {}),

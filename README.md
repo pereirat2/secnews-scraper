@@ -10,8 +10,8 @@ A zero-LLM cybersecurity news pipeline. Pulls ~30 RSS/Atom/JSON feeds, deduplica
 
 ## Features
 
-- 35+ feeds: vendor research (Google Project Zero, Microsoft Security, Mandiant, Unit 42, Talos, Cloudflare, Mozilla, …), news sites (BleepingComputer, KrebsOnSecurity, The Register, Dark Reading, Risky Business News, Schneier, …), researcher Mastodon (Troy Hunt, Will Dormann), CISA KEV, Exploit-DB, and more.
-- 48h URL dedup + fuzzy title match (catches the same CVE story across multiple outlets).
+- 30+ feeds: vendor research (Google Project Zero, Mandiant, Unit 42, Talos, Cloudflare, Mozilla, …), news sites (BleepingComputer, KrebsOnSecurity, The Register, Dark Reading, Risky Business News, Schneier, …), researcher Mastodon (Troy Hunt, Will Dormann), CISA KEV, Exploit-DB, and more.
+- Multi-signal dedup: 48h URL cache + same-CVE collapse + multi-signal text similarity (stopword-filtered + stemmed Jaccard on title and combined text, plus a "shared specific tokens" rescue rule). Catches the same incident reported by multiple outlets even when their titles share only a few keywords. Different CVE IDs are treated as distinct vulnerabilities and never merged.
 - Aggregator sources (HN, Full Disclosure) are filtered against a security keyword list.
 - Severity classification (`CRITICAL` / `HIGH` / `MEDIUM` / `DISCARD`) used to filter noise, order items, pick a per-item color icon (🔴/🟠/🟡), and decide whether the post pings subscribers.
 - One Telegram message per news item — each story is its own post, scrollable, reactable, forwardable. Items are sent in severity order with a 2-second pacing delay (well within Telegram's per-chat rate limits).
@@ -176,6 +176,21 @@ Edit `secnews/sources.py`. Each entry is `(name, url, is_json_api, extra_headers
 
 - Add the source name to `AGGREGATOR_SOURCES` if it's noisy/general (HN, FullDisclosure) — this enables keyword filtering against `KEYWORD_INCLUDE_PATTERNS`.
 - Add to `HTML_SCRAPE_SOURCES` for sources that need plain-HTML scraping (currently only Full Disclosure).
+
+## Tuning deduplication
+
+Dedup runs in `secnews/processor.py` → `dedup_items()`. It checks every new article against the ones already kept this cycle and rejects it if any of these signals fires:
+
+1. **Same CVE-ID** (e.g. both mention `CVE-2026-12345`) — exact dup.
+2. **Title Jaccard ≥ `TITLE_JACCARD`** (default `0.30`) on stop-word-filtered, stemmed token sets.
+3. **Combined (title + first 600 chars of description) Jaccard ≥ `COMBINED_JACCARD`** (default `0.25`).
+4. **Combined Jaccard ≥ `SECONDARY_JACCARD`** (default `0.10`) **and** ≥ `MIN_SHARED_SPECIFIC` (default `3`) shared "specific" tokens — tokens of length ≥ 6 after stemming. This catches stories that share a few rare technical/proper-noun terms (`prison`, `ransomware`, `sentenc`) even when their general phrasing diverges.
+
+**Override:** if both articles carry CVE IDs and they are different (e.g. CVE-2026-42778 vs CVE-2026-42779 in Apache MINA), they are never merged regardless of text similarity. Different CVE = different vulnerability = different story.
+
+These thresholds err aggressive on purpose — the design preference is to occasionally suppress a unique-but-similar story rather than ship four different outlets' write-ups of the same incident. Bump the thresholds up if you want fewer false-positive merges; lower them for even more aggressive collapsing.
+
+The stop-word list (which drops headline filler like *the, a, two, year, new, US*) lives in `_STOPWORDS` in the same module. Add domain-specific filler there if you find unrelated stories getting merged on it.
 
 ## Tuning severity classification
 
