@@ -13,27 +13,37 @@ A zero-LLM cybersecurity news pipeline. Pulls ~30 RSS/Atom/JSON feeds, deduplica
 - 30+ feeds: vendor blogs (Google, Mozilla, Mandiant, Unit 42, Talos…), news sites (BleepingComputer, KrebsOnSecurity, The Register, Dark Reading…), researcher Mastodon (Troy Hunt, Will Dormann), CISA KEV, Exploit-DB, and more.
 - 48h URL dedup + fuzzy title match (catches the same CVE story across multiple outlets).
 - Aggregator sources (HN, Full Disclosure) are filtered against a security keyword list.
-- Internal severity classification (`CRITICAL` / `HIGH` / `MEDIUM` / `DISCARD`) used to filter noise and order items — not surfaced in the digest.
-- Clean labeled digest format (`Title: / Summary: / Source:`) with HTML formatting, auto-chunking at 4000 chars, and a parse-failure fallback to plain text.
+- Severity classification (`CRITICAL` / `HIGH` / `MEDIUM` / `DISCARD`) used to filter noise, order items, and pick a per-item color icon (🔴/🟠/🟡).
+- Clean digest format: severity icon + bold title + indented summary blockquote + linked source. HTML formatting with auto-chunking at 4000 chars and a parse-failure fallback to plain text.
 - Atomic JSON writes, retry/backoff on HTTP, `flock`-protected cron, log rotation.
 - Idle-hour "funny filler" message, throttled to once per hour.
 
 ### Digest format
 
-Each item is rendered as a bold title (the visual anchor), an optional summary paragraph, and a `Source:` line. Items are separated by extra blank-line breathing room — no labels, no dividers:
+Each item is rendered as:
+
+- A **severity icon** (🔴 critical, 🟠 high, 🟡 medium) immediately before the title — your eye latches onto this at the start of every item, even on a small screen.
+- A **bold title** (the primary anchor).
+- An optional **blockquote summary** — Telegram renders this with a left vertical bar and indent, visually offsetting it from the title and source line.
+- A **bold `Source:` line** with a clickable `Read more` hyperlink to the original article.
 
 ```
-Critical cPanel and WHM bug exploited as a zero-day, PoC now available
-
-The critical CVE-2026-41940 authentication bypass vulnerability in cPanel, WHM, and WP Squared is being actively exploited in the wild.
+🔴 GitHub fixes RCE flaw that gave access to millions of private repos
+▎ In early March, GitHub patched a critical RCE vulnerability (CVE-2026-3854) that could have allowed attackers to access millions of private repositories.
 Source: BleepingComputer | Read more
 
 
-GitHub fixes RCE flaw
-Source: TheHackerNews | Read more
+🟠 Critical cPanel & WHM Vulnerability Exploited as Zero-Day for Months
+▎ The authentication bypass flaw allows attackers to gain administrative access to vulnerable servers.
+Source: SecurityWeek | Read more
+
+
+🟡 Synway SMG Gateway RCE via Unauthenticated OS Command Injection
+▎ CVE-2025-71284 identifies a critical OS command injection vulnerability within the Synway SMG Gateway Management Software.
+Source: TheHackerWire | Read more
 ```
 
-The title is bold; `Source:` label is bold; `Read more` is a clickable hyperlink. The summary paragraph is omitted when the source feed doesn't provide one. Items are ordered most-severe first internally (critical → high → medium) but no severity labels appear in the message. When the digest exceeds Telegram's 4 KB limit, splits happen only at item boundaries — never mid-item.
+Items are separated by two blank lines for breathing room (no printable divider). The summary blockquote is omitted when the source feed doesn't provide one. Items appear most-severe first (critical → high → medium). When the digest exceeds Telegram's 4 KB limit, splits happen only at item boundaries — never mid-item.
 
 ## Project layout
 
@@ -159,10 +169,11 @@ Edit `secnews/sources.py`. Each entry is `(name, url, is_json_api, extra_headers
 
 ## Tuning severity classification
 
-Severity is computed internally and used for two things:
+Severity is computed internally and used for three things:
 
 1. **Filtering** — anything classified `discard` (or matching no pattern at all) never reaches Telegram.
-2. **Ordering** — items appear in the digest most-severe first (`critical → high → medium`), even though the labels themselves aren't shown.
+2. **Ordering** — items appear in the digest most-severe first (`critical → high → medium`).
+3. **Per-item icon** — the leading 🔴/🟠/🟡 emoji on each item's title.
 
 Rules live in `secnews/processor.py` as four pattern lists:
 

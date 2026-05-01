@@ -190,10 +190,16 @@ def dedup_items(items: list[dict]) -> list[dict]:
 
 
 # === MESSAGE FORMATTING (HTML) ===
-# Items contain an internal "\n\n" between title and summary, so blocks are
-# joined with "\n\n\n" (two blank lines) so the chunker can split there
-# without ever splitting inside an item.
+# Items are joined with two blank lines (\n\n\n) so the chunker can split
+# only at item boundaries — never mid-item.
 BLOCK_SEPARATOR = "\n\n\n"
+
+SEVERITY_ICONS = {
+    "critical": "\U0001F534",  # 🔴
+    "high": "\U0001F7E0",       # 🟠
+    "medium": "\U0001F7E1",     # 🟡
+}
+DEFAULT_ICON = "\U0001F539"    # 🔹
 
 
 def format_message(items: list[dict]) -> str:
@@ -212,11 +218,11 @@ def _format_item(item: dict) -> str:
     summary = item.get("_summary", "")
     source = escape_html(item.get("source", "Unknown"))
     url = escape_html_attr(item.get("url", ""))
+    icon = SEVERITY_ICONS.get(item.get("_severity"), DEFAULT_ICON)
 
-    lines = [f"<b>{title}</b>"]
+    lines = [f"{icon} <b>{title}</b>"]
     if summary:
-        lines.append("")
-        lines.append(escape_html(summary))
+        lines.append(f"<blockquote>{escape_html(summary)}</blockquote>")
     lines.append(f"<b>Source:</b> {source} | <a href=\"{url}\">Read more</a>")
     return "\n".join(lines)
 
@@ -278,6 +284,7 @@ def main() -> int:
         if sev == "discard":
             continue
         item["_summary"] = extract_summary(item.get("title", ""), item.get("description", ""))
+        item["_severity"] = sev
         if sev == "critical":
             critical.append(item)
         elif sev == "high":
@@ -327,6 +334,7 @@ def _mark_processed(data: list[dict], unprocessed: list[tuple[int, dict]]) -> No
     for idx, _ in unprocessed:
         data[idx]["processed"] = True
         data[idx].pop("_summary", None)
+        data[idx].pop("_severity", None)
     tmp = config.WINDOW_FILE.with_suffix(config.WINDOW_FILE.suffix + ".tmp")
     tmp.write_text(json.dumps(data, indent=2))
     tmp.replace(config.WINDOW_FILE)
