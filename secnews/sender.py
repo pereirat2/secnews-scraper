@@ -67,12 +67,17 @@ def _split_for_telegram(
     return chunks
 
 
-def _post_chunk(text: str, parse_mode: str | None) -> dict:
+def _post_chunk(
+    text: str,
+    parse_mode: str | None,
+    disable_notification: bool = False,
+) -> dict:
     url = f"{API_BASE}/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
+    payload: dict = {
         "chat_id": config.TELEGRAM_CHAT_ID,
         "text": text,
         "disable_web_page_preview": True,
+        "disable_notification": disable_notification,
     }
     if parse_mode:
         payload["parse_mode"] = parse_mode
@@ -106,13 +111,17 @@ def send_message(
     text: str,
     parse_mode: str | None = "HTML",
     chunk_separator: str = "\n\n",
+    disable_notification: bool = False,
 ) -> list[dict]:
     """Send a message to the configured chat, splitting if necessary.
 
-    `chunk_separator` controls where multi-message splits may occur. Use a
-    distinctive marker (e.g. `\\n\\n-----\\n\\n`) when the message contains
-    intentional `\\n\\n` whitespace inside a logical block that must not be
-    split mid-way.
+    - `chunk_separator` controls where multi-message splits may occur. Use a
+      distinctive marker (e.g. `\\n\\n-----\\n\\n`) when the message contains
+      intentional `\\n\\n` whitespace inside a logical block that must not be
+      split mid-way.
+    - `disable_notification=True` posts the message silently — no push
+      notification, no in-app sound — useful for low-severity bulk items.
+
     Returns the list of API responses (one per chunk).
     """
     if not text or not text.strip():
@@ -121,7 +130,7 @@ def send_message(
     results: list[dict] = []
     for i, chunk in enumerate(chunks, start=1):
         log.debug("Sending chunk %d/%d (%d chars)", i, len(chunks), len(chunk))
-        results.append(_post_chunk(chunk, parse_mode))
+        results.append(_post_chunk(chunk, parse_mode, disable_notification))
     return results
 
 

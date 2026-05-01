@@ -1,11 +1,11 @@
 # secnews-scraper
 
-A zero-LLM cybersecurity news pipeline. Pulls ~30 RSS/Atom/JSON feeds, deduplicates, filters noise via severity classification, and posts an hourly digest to Telegram. Runs as two cron jobs on Linux. No external services beyond the feeds and the Telegram Bot API.
+A zero-LLM cybersecurity news pipeline. Pulls ~30 RSS/Atom/JSON feeds, deduplicates, filters noise via severity classification, and posts each story as an individual Telegram message — one news item, one channel post. Runs as two cron jobs on Linux. No external services beyond the feeds and the Telegram Bot API.
 
 ```
    :00 UTC ───► collector ──► /var/lib/secnews/cyber_news_24h.json
                                               │
-   :05 UTC ───► processor ──► classify ──► dedup ──► HTML digest ──► Telegram
+   :05 UTC ───► processor ──► classify ──► dedup ──► one Telegram message per item
 ```
 
 ## Features
@@ -13,37 +13,47 @@ A zero-LLM cybersecurity news pipeline. Pulls ~30 RSS/Atom/JSON feeds, deduplica
 - 30+ feeds: vendor blogs (Google, Mozilla, Mandiant, Unit 42, Talos…), news sites (BleepingComputer, KrebsOnSecurity, The Register, Dark Reading…), researcher Mastodon (Troy Hunt, Will Dormann), CISA KEV, Exploit-DB, and more.
 - 48h URL dedup + fuzzy title match (catches the same CVE story across multiple outlets).
 - Aggregator sources (HN, Full Disclosure) are filtered against a security keyword list.
-- Severity classification (`CRITICAL` / `HIGH` / `MEDIUM` / `DISCARD`) used to filter noise, order items, and pick a per-item color icon (🔴/🟠/🟡).
-- Clean digest format: severity icon + bold title + indented summary blockquote + linked source. HTML formatting with auto-chunking at 4000 chars and a parse-failure fallback to plain text.
+- Severity classification (`CRITICAL` / `HIGH` / `MEDIUM` / `DISCARD`) used to filter noise, order items, pick a per-item color icon (🔴/🟠/🟡), and decide whether the post pings subscribers.
+- One Telegram message per news item — each story is its own post, scrollable, reactable, forwardable. Items are sent in severity order with a 2-second pacing delay (well within Telegram's per-chat rate limits).
+- Quiet delivery for medium-severity items (`disable_notification=true`) — subscribers only get pinged for critical and high.
+- Granular retry semantics — items are marked `processed` only on successful send, so a transient failure on one item retries just that item next cycle.
+- Item layout: severity icon + bold title + indented summary blockquote + linked source. HTML formatting with parse-failure fallback to plain text.
 - Atomic JSON writes, retry/backoff on HTTP, `flock`-protected cron, log rotation.
 - Idle-hour "funny filler" message, throttled to once per hour.
 
-### Digest format
+### Item format
 
-Each item is rendered as:
+Each news item is sent as **its own Telegram message**, rendered as:
 
-- A **severity icon** (🔴 critical, 🟠 high, 🟡 medium) immediately before the title — your eye latches onto this at the start of every item, even on a small screen.
+- A **severity icon** (🔴 critical, 🟠 high, 🟡 medium) immediately before the title — your eye latches onto this at the start of every item.
 - A **bold title** (the primary anchor).
-- An optional **blockquote summary** — Telegram renders this with a left vertical bar and indent, visually offsetting it from the title and source line.
+- An optional **blockquote summary** — Telegram renders this with a left vertical bar and indent.
 - A **bold `Source:` line** with a clickable `Read more` hyperlink to the original article.
 
 ```
 🔴 GitHub fixes RCE flaw that gave access to millions of private repos
 ▎ In early March, GitHub patched a critical RCE vulnerability (CVE-2026-3854) that could have allowed attackers to access millions of private repositories.
 Source: BleepingComputer | Read more
-
-
-🟠 Critical cPanel & WHM Vulnerability Exploited as Zero-Day for Months
-▎ The authentication bypass flaw allows attackers to gain administrative access to vulnerable servers.
-Source: SecurityWeek | Read more
-
-
-🟡 Synway SMG Gateway RCE via Unauthenticated OS Command Injection
-▎ CVE-2025-71284 identifies a critical OS command injection vulnerability within the Synway SMG Gateway Management Software.
-Source: TheHackerWire | Read more
 ```
 
-Items are separated by two blank lines for breathing room (no printable divider). The summary blockquote is omitted when the source feed doesn't provide one. Items appear most-severe first (critical → high → medium). When the digest exceeds Telegram's 4 KB limit, splits happen only at item boundaries — never mid-item.
+The summary blockquote is omitted when the source feed doesn't provide one. Items are sent in severity order (critical → high → medium), one message every ~2 seconds, until all items for the cycle have been delivered.
+
+### Notification behavior
+
+| Severity | Push notification | Reason |
+|----------|------------------:|--------|
+| `critical` | yes | Actively-exploited / emergency — should ping. |
+| `high`     | yes | CVEs, RCE, ransomware, APTs — usually ping-worthy. |
+| `medium`   | no  | Sent silently (`disable_notification=true`) so the channel can carry volume without flooding subscribers with pings. |
+
+This is set by `QUIET_SEVERITIES` in `secnews/processor.py`; tweak it to your taste.
+
+### Delivery & retry semantics
+
+- Items are sent **one at a time** with `SEND_DELAY_SECONDS = 2.0` between sends. With ~30 items per cycle that's ~1 minute of pacing — well under Telegram's per-chat rate limit.
+- An item is marked `processed: true` in the window file **only after** Telegram returns `ok: true` for that specific item.
+- If a single item's send fails (network glitch, 429 rate-limited, transient API error), the other items in the same cycle still go through. The failed item stays `processed: false` and is retried on the next hour's cron run.
+- The processor exits non-zero (code `4`) when any item failed, so cron logs surface the partial failure even when the overall run was mostly successful.
 
 ## Project layout
 
@@ -186,10 +196,13 @@ Anything not matching any list defaults to `discard`.
 
 ## Operational notes
 
-- The first run after install will dump up to 24h of articles in one digest (window seeds from empty). Expect a long message.
-- If you want a clean start, delete `/var/lib/secnews/cyber_news_24h.json` — the next collector run will rebuild it.
+- The first run after install will deliver up to 24h of articles individually, paced 2 seconds apart. Expect a noisy first cycle (potentially dozens of posts). If you want to start clean, replace the window with `[]`:
+  ```bash
+  sudo bash -c 'echo "[]" > /var/lib/secnews/cyber_news_24h.json'
+  ```
 - The dedup cache (`cyber_news_dedup.json`) persists across runs and self-purges entries older than 48h.
-- A failed Telegram send leaves items as `processed: false`, so the next run retries.
+- Per-item granular retry: a Telegram failure on one item leaves only that item as `processed: false`; siblings that succeeded are not re-sent next cycle.
+- If you want all items to ping (no quiet medium), edit `QUIET_SEVERITIES` in `secnews/processor.py`. To slow down delivery (e.g., spread items more), bump `SEND_DELAY_SECONDS`.
 
 ## Security
 

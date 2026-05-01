@@ -1,8 +1,11 @@
-"""Stage 2: Classify articles by severity and send digest to Telegram.
+"""Stage 2: Classify articles by severity and send each item to Telegram.
 
 Runs at :05 every hour. Reads {DATA_DIR}/cyber_news_24h.json, classifies
 unprocessed items into critical/high/medium/discard, dedups by CVE-ID and
-fuzzy title overlap, formats an HTML message, and sends via secnews.sender.
+fuzzy title overlap, then sends each item as its own Telegram message
+(one item = one channel post). Successfully-sent items are marked
+processed individually, so a transient failure on one item only retries
+that item next cycle — successful items are not re-sent.
 """
 
 from __future__ import annotations
@@ -11,12 +14,23 @@ import json
 import random
 import re
 import sys
+import time
 from datetime import datetime, timezone
 
 from . import config
 from .sender import escape_html, escape_html_attr, send_message
 
 log = config.setup_logging("processor")
+
+# Seconds to sleep between item sends. Telegram allows ~1 msg/sec sustained
+# to a single chat; 2s gives plenty of margin and absorbs the occasional
+# slow API response.
+SEND_DELAY_SECONDS = 2.0
+
+# Severities that post silently (no push notification, no in-app sound).
+# Critical and high still ping subscribers; medium-severity items deliver
+# quietly to keep the channel from drowning subscribers in pings.
+QUIET_SEVERITIES: set[str] = {"medium"}
 
 
 # === SEVERITY CLASSIFICATION ===
@@ -190,27 +204,12 @@ def dedup_items(items: list[dict]) -> list[dict]:
 
 
 # === MESSAGE FORMATTING (HTML) ===
-# Items are joined with two blank lines (\n\n\n) so the chunker can split
-# only at item boundaries — never mid-item.
-BLOCK_SEPARATOR = "\n\n\n"
-
 SEVERITY_ICONS = {
     "critical": "\U0001F534",  # 🔴
     "high": "\U0001F7E0",       # 🟠
     "medium": "\U0001F7E1",     # 🟡
 }
 DEFAULT_ICON = "\U0001F539"    # 🔹
-
-
-def format_message(items: list[dict]) -> str:
-    """Render the digest. Items should already be deduped and ordered."""
-    now = datetime.now(timezone.utc)
-    date_str = now.strftime("%d %b %Y %H:%M")
-
-    blocks: list[str] = [f"<b>SECURITY DIGEST</b> — {escape_html(date_str)} UTC"]
-    blocks.extend(_format_item(item) for item in items)
-    blocks.append("<i>— Next update in ~60 min</i>")
-    return BLOCK_SEPARATOR.join(blocks)
 
 
 def _format_item(item: dict) -> str:
@@ -292,9 +291,8 @@ def main() -> int:
         elif sev == "medium":
             medium.append(item)
 
-    # Severity is still used for ordering (critical → high → medium), but no
-    # longer surfaced in the digest. Dedup once across the union so we don't
-    # emit the same story twice if it landed in two buckets.
+    # Order by severity (critical → high → medium), then dedup once across
+    # the union so a story landing in two buckets only ships once.
     items = dedup_items(critical + high + medium)
     total = len(items)
 
@@ -303,35 +301,69 @@ def main() -> int:
 
     if total == 0:
         send_funny()
-        _mark_processed(data, unprocessed)
+        _mark_processed_indices(data, [idx for idx, _ in unprocessed])
         return 0
 
-    message = format_message(items)
-    log.info("Built digest: %d chars.", len(message))
+    sent_indices, failed = _send_items_individually(items, unprocessed)
 
-    try:
-        # Split only at block boundaries (two blank lines between items).
-        # Items contain "\n\n" internally (title → summary), so this stops
-        # chunks from breaking a single item across two Telegram messages.
-        results = send_message(
-            message,
-            parse_mode="HTML",
-            chunk_separator=BLOCK_SEPARATOR,
-        )
-    except Exception as e:
-        log.exception("Send failed: %s", e)
-        return 3
-
-    if all(r.get("ok") for r in results):
-        _mark_processed(data, unprocessed)
-        log.info("SUCCESS: %d items reported, all marked processed.", total)
-        return 0
-    log.error("Send returned non-ok: %s", results)
-    return 4
+    log.info("Sent %d/%d items individually (%d failed).",
+             len(sent_indices), total, failed)
+    _mark_processed_indices(data, sent_indices)
+    return 0 if failed == 0 else 4
 
 
-def _mark_processed(data: list[dict], unprocessed: list[tuple[int, dict]]) -> None:
-    for idx, _ in unprocessed:
+def _send_items_individually(
+    items: list[dict],
+    unprocessed: list[tuple[int, dict]],
+) -> tuple[list[int], int]:
+    """Send each item as its own Telegram message.
+
+    Returns (indices_of_successfully_sent_items_in_data, failure_count).
+    Items not in the returned list keep `processed: false` and will be
+    retried next cycle.
+    """
+    # Map url → index in `data` so we can mark only successful sends.
+    url_to_idx = {item.get("url", ""): idx for idx, item in unprocessed}
+
+    sent_indices: list[int] = []
+    failed = 0
+    total = len(items)
+
+    for i, item in enumerate(items, start=1):
+        sev = item.get("_severity", "medium")
+        quiet = sev in QUIET_SEVERITIES
+        title_preview = item.get("title", "")[:70]
+        body = _format_item(item)
+        log.info("[%d/%d] %s | severity=%s quiet=%s",
+                 i, total, title_preview, sev, quiet)
+
+        try:
+            results = send_message(
+                body,
+                parse_mode="HTML",
+                disable_notification=quiet,
+            )
+            if all(r.get("ok") for r in results):
+                idx = url_to_idx.get(item.get("url", ""))
+                if idx is not None:
+                    sent_indices.append(idx)
+            else:
+                log.error("[%d/%d] send returned non-ok: %s", i, total, results)
+                failed += 1
+        except Exception as e:
+            log.error("[%d/%d] send raised: %s", i, total, e)
+            failed += 1
+
+        if i < total:
+            time.sleep(SEND_DELAY_SECONDS)
+
+    return sent_indices, failed
+
+
+def _mark_processed_indices(data: list[dict], indices: list[int]) -> None:
+    if not indices:
+        return
+    for idx in indices:
         data[idx]["processed"] = True
         data[idx].pop("_summary", None)
         data[idx].pop("_severity", None)
