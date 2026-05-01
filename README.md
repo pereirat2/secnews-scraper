@@ -20,21 +20,20 @@ A zero-LLM cybersecurity news pipeline. Pulls ~30 RSS/Atom/JSON feeds, deduplica
 
 ### Digest format
 
-Each item is rendered as a bold title (the visual anchor), an optional `Summary:` line, and a `Source:` line. Items are separated by a `-----` divider:
+Each item is rendered as a bold title (the visual anchor), an optional summary paragraph, and a `Source:` line. Items are separated by extra blank-line breathing room — no labels, no dividers:
 
 ```
 Critical cPanel and WHM bug exploited as a zero-day, PoC now available
 
-Summary: The critical CVE-2026-41940 authentication bypass vulnerability in cPanel, WHM, and WP Squared is being actively exploited in the wild.
+The critical CVE-2026-41940 authentication bypass vulnerability in cPanel, WHM, and WP Squared is being actively exploited in the wild.
 Source: BleepingComputer | Read more
 
------
 
 GitHub fixes RCE flaw
 Source: TheHackerNews | Read more
 ```
 
-The title is bold; `Summary:` and `Source:` labels are bold; `Read more` is a clickable hyperlink. The `Summary:` line is omitted when the source feed doesn't provide one. Items are ordered most-severe first internally (critical → high → medium) but no severity labels appear in the message. When the digest exceeds Telegram's 4 KB limit, splits happen only at `-----` divider boundaries — never mid-item.
+The title is bold; `Source:` label is bold; `Read more` is a clickable hyperlink. The summary paragraph is omitted when the source feed doesn't provide one. Items are ordered most-severe first internally (critical → high → medium) but no severity labels appear in the message. When the digest exceeds Telegram's 4 KB limit, splits happen only at item boundaries — never mid-item.
 
 ## Project layout
 

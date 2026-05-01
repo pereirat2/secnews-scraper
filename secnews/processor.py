@@ -190,30 +190,21 @@ def dedup_items(items: list[dict]) -> list[dict]:
 
 
 # === MESSAGE FORMATTING (HTML) ===
-ITEM_DIVIDER = "-----"
+# Items contain an internal "\n\n" between title and summary, so blocks are
+# joined with "\n\n\n" (two blank lines) so the chunker can split there
+# without ever splitting inside an item.
+BLOCK_SEPARATOR = "\n\n\n"
 
 
 def format_message(items: list[dict]) -> str:
-    """Render the digest. Items should already be deduped and ordered.
-
-    The divider is glued to the END of each non-last item (with a blank line
-    above it). This keeps `divider + next item` from being orphaned across
-    Telegram chunk boundaries — the chunker splits on blank-line paragraph
-    breaks, so an item-with-trailing-divider is treated as a single atomic
-    block.
-    """
+    """Render the digest. Items should already be deduped and ordered."""
     now = datetime.now(timezone.utc)
     date_str = now.strftime("%d %b %Y %H:%M")
 
     blocks: list[str] = [f"<b>SECURITY DIGEST</b> — {escape_html(date_str)} UTC"]
-    last = len(items) - 1
-    for i, item in enumerate(items):
-        block = _format_item(item)
-        if i < last:
-            block = f"{block}\n\n{ITEM_DIVIDER}"
-        blocks.append(block)
+    blocks.extend(_format_item(item) for item in items)
     blocks.append("<i>— Next update in ~60 min</i>")
-    return "\n\n".join(blocks)
+    return BLOCK_SEPARATOR.join(blocks)
 
 
 def _format_item(item: dict) -> str:
@@ -225,7 +216,7 @@ def _format_item(item: dict) -> str:
     lines = [f"<b>{title}</b>"]
     if summary:
         lines.append("")
-        lines.append(f"<b>Summary:</b> {escape_html(summary)}")
+        lines.append(escape_html(summary))
     lines.append(f"<b>Source:</b> {source} | <a href=\"{url}\">Read more</a>")
     return "\n".join(lines)
 
@@ -312,13 +303,13 @@ def main() -> int:
     log.info("Built digest: %d chars.", len(message))
 
     try:
-        # Split only at item boundaries — the divider is glued between items
-        # and never appears inside one, so chunks can never break a single
-        # item across two Telegram messages.
+        # Split only at block boundaries (two blank lines between items).
+        # Items contain "\n\n" internally (title → summary), so this stops
+        # chunks from breaking a single item across two Telegram messages.
         results = send_message(
             message,
             parse_mode="HTML",
-            chunk_separator=f"\n\n{ITEM_DIVIDER}\n\n",
+            chunk_separator=BLOCK_SEPARATOR,
         )
     except Exception as e:
         log.exception("Send failed: %s", e)
