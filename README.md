@@ -15,7 +15,7 @@ A zero-LLM cybersecurity news pipeline. Pulls ~30 RSS/Atom/JSON feeds, deduplica
 - Aggregator sources (HN, Full Disclosure) are filtered against a security keyword list.
 - Severity classification (`CRITICAL` / `HIGH` / `MEDIUM` / `DISCARD`) used to filter noise, order items, pick a per-item color icon (🔴/🟠/🟡), and decide whether the post pings subscribers.
 - One Telegram message per news item — each story is its own post, scrollable, reactable, forwardable. Items are sent in severity order with a 2-second pacing delay (well within Telegram's per-chat rate limits).
-- Quiet delivery for medium-severity items (`disable_notification=true`) — subscribers only get pinged for critical and high.
+- All items ping subscribers by default; `disable_notification` is opt-in via `QUIET_SEVERITIES` in `processor.py` if you ever want low-severity items to deliver silently.
 - Granular retry semantics — items are marked `processed` only on successful send, so a transient failure on one item retries just that item next cycle.
 - Item layout: severity icon + bold title + indented summary blockquote + linked source. HTML formatting with parse-failure fallback to plain text.
 - Atomic JSON writes, retry/backoff on HTTP, `flock`-protected cron, log rotation.
@@ -40,13 +40,13 @@ The summary blockquote is omitted when the source feed doesn't provide one. Item
 
 ### Notification behavior
 
-| Severity | Push notification | Reason |
-|----------|------------------:|--------|
-| `critical` | yes | Actively-exploited / emergency — should ping. |
-| `high`     | yes | CVEs, RCE, ransomware, APTs — usually ping-worthy. |
-| `medium`   | no  | Sent silently (`disable_notification=true`) so the channel can carry volume without flooding subscribers with pings. |
+By default every item pings subscribers. To make some severities deliver silently (no push notification, no in-app sound), add them to `QUIET_SEVERITIES` in `secnews/processor.py`:
 
-This is set by `QUIET_SEVERITIES` in `secnews/processor.py`; tweak it to your taste.
+```python
+QUIET_SEVERITIES: set[str] = {"medium"}        # quiet medium only
+QUIET_SEVERITIES: set[str] = {"medium", "high"} # only critical pings
+QUIET_SEVERITIES: set[str] = set()              # default: everything pings
+```
 
 ### Delivery & retry semantics
 
@@ -202,7 +202,7 @@ Anything not matching any list defaults to `discard`.
   ```
 - The dedup cache (`cyber_news_dedup.json`) persists across runs and self-purges entries older than 48h.
 - Per-item granular retry: a Telegram failure on one item leaves only that item as `processed: false`; siblings that succeeded are not re-sent next cycle.
-- If you want all items to ping (no quiet medium), edit `QUIET_SEVERITIES` in `secnews/processor.py`. To slow down delivery (e.g., spread items more), bump `SEND_DELAY_SECONDS`.
+- To make some severities silent, add them to `QUIET_SEVERITIES` in `secnews/processor.py`. To slow down delivery, bump `SEND_DELAY_SECONDS`.
 
 ## Security
 

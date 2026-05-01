@@ -28,9 +28,9 @@ log = config.setup_logging("processor")
 SEND_DELAY_SECONDS = 2.0
 
 # Severities that post silently (no push notification, no in-app sound).
-# Critical and high still ping subscribers; medium-severity items deliver
-# quietly to keep the channel from drowning subscribers in pings.
-QUIET_SEVERITIES: set[str] = {"medium"}
+# Empty by default — every item pings. Add e.g. "medium" here if you ever
+# want low-severity items to deliver quietly.
+QUIET_SEVERITIES: set[str] = set()
 
 
 # === SEVERITY CLASSIFICATION ===
