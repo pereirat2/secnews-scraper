@@ -20,15 +20,16 @@ A zero-LLM cybersecurity news pipeline. Pulls ~30 RSS/Atom/JSON feeds, deduplica
 
 ### Digest format
 
-Each item is rendered as three labeled lines:
+Each item is rendered as a bold title (the visual anchor), an optional `Summary:` block, and a `Source:` line:
 
 ```
-Title: US ransomware negotiators get 4 years in prison over BlackCat attacks
-Summary: Two former employees of cybersecurity incident response companies Sygnia and DigitalMint were sentenced to four years in prison.
+US ransomware negotiators get 4 years in prison over BlackCat attacks
+Summary:
+Two former employees of cybersecurity incident response companies Sygnia and DigitalMint were sentenced to four years in prison.
 Source: BleepingComputer | Read more
 ```
 
-`Title:`, `Summary:`, and `Source:` are bold; `Read more` is a clickable hyperlink. The `Summary:` line is omitted when the source feed doesn't provide one. Items are ordered most-severe first internally (critical → high → medium) but no severity labels appear in the message.
+The title is bold; `Summary:` and `Source:` labels are bold; `Read more` is a clickable hyperlink. The `Summary:` block is omitted when the source feed doesn't provide one. Items are ordered most-severe first internally (critical → high → medium) but no severity labels appear in the message.
 
 ## Project layout
 

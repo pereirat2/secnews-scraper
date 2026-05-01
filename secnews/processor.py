@@ -210,9 +210,10 @@ def _format_item(item: dict) -> str:
     source = escape_html(item.get("source", "Unknown"))
     url = escape_html_attr(item.get("url", ""))
 
-    lines = [f"<b>Title:</b> {title}"]
+    lines = [f"<b>{title}</b>"]
     if summary:
-        lines.append(f"<b>Summary:</b> {escape_html(summary)}")
+        lines.append("<b>Summary:</b>")
+        lines.append(escape_html(summary))
     lines.append(f"<b>Source:</b> {source} | <a href=\"{url}\">Read more</a>")
     return "\n".join(lines)
 
