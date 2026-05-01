@@ -41,15 +41,22 @@ def escape_html_attr(text: str) -> str:
     return escape_html(text).replace('"', "&quot;")
 
 
-def _split_for_telegram(message: str, limit: int = MAX_LEN) -> list[str]:
-    """Split a long message preserving paragraph boundaries (\\n\\n)."""
+def _split_for_telegram(
+    message: str, limit: int = MAX_LEN, separator: str = "\n\n"
+) -> list[str]:
+    """Split a long message into <= `limit`-char chunks at `separator` boundaries.
+
+    The separator must appear in the message verbatim and is the ONLY place
+    splits are allowed. Pass a stronger separator (e.g. "\\n\\n-----\\n\\n")
+    to avoid splitting inside a logical block that itself contains "\\n\\n".
+    """
     if len(message) <= limit:
         return [message]
-    paragraphs = message.split("\n\n")
+    paragraphs = message.split(separator)
     chunks: list[str] = []
     current = ""
     for para in paragraphs:
-        candidate = current + ("\n\n" if current else "") + para
+        candidate = current + (separator if current else "") + para
         if len(candidate) > limit and current:
             chunks.append(current)
             current = para
@@ -95,13 +102,22 @@ def _post_chunk(text: str, parse_mode: str | None) -> dict:
     raise RuntimeError(f"Telegram send failed after {MAX_RETRIES} attempts: {last_exc}")
 
 
-def send_message(text: str, parse_mode: str | None = "HTML") -> list[dict]:
+def send_message(
+    text: str,
+    parse_mode: str | None = "HTML",
+    chunk_separator: str = "\n\n",
+) -> list[dict]:
     """Send a message to the configured chat, splitting if necessary.
+
+    `chunk_separator` controls where multi-message splits may occur. Use a
+    distinctive marker (e.g. `\\n\\n-----\\n\\n`) when the message contains
+    intentional `\\n\\n` whitespace inside a logical block that must not be
+    split mid-way.
     Returns the list of API responses (one per chunk).
     """
     if not text or not text.strip():
         raise ValueError("send_message: empty message")
-    chunks = _split_for_telegram(text)
+    chunks = _split_for_telegram(text, separator=chunk_separator)
     results: list[dict] = []
     for i, chunk in enumerate(chunks, start=1):
         log.debug("Sending chunk %d/%d (%d chars)", i, len(chunks), len(chunk))
